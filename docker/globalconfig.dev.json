@@ -1,0 +1,7 @@
+{
+  "_comment": "Minimal, non-secret GlobalConfig file for standalone docker-compose/local dev. Every REAL value (connection strings, JWKS URI) is supplied directly as container env vars in docker-compose.yml instead — this file just satisfies AddKartGlobalConfig's required-file check (kart-conventions.md's Configuration Management layer) with an intentionally empty Global/Services shape. Never used in a real deployed environment.",
+  "Global": {},
+  "Services": {
+    "kart-review-service": {}
+  }
+}

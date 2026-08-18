@@ -1,0 +1,54 @@
+{
+  "service": "kart-review-service",
+  "exchanges": [
+    { "name": "review.exchange", "type": "topic", "durable": true },
+    { "name": "review.dlx", "type": "topic", "durable": true }
+  ],
+  "externalExchanges": [
+    { "name": "order.exchange", "type": "topic", "durable": true }
+  ],
+  "publishedEvents": [
+    { "eventType": "ReviewSubmitted", "exchange": "review.exchange", "routingKey": "review.review.submitted" },
+    { "eventType": "ReviewUpdated", "exchange": "review.exchange", "routingKey": "review.review.updated" },
+    { "eventType": "ReviewUnpublished", "exchange": "review.exchange", "routingKey": "review.review.unpublished" }
+  ],
+  "queues": [
+    {
+      "name": "review.order-events.queue",
+      "durable": true,
+      "bindings": [
+        { "exchange": "order.exchange", "routingKey": "order.order.created" },
+        { "exchange": "order.exchange", "routingKey": "order.order.delivered" }
+      ],
+      "deadLetter": { "exchange": "review.dlx", "routingKey": "review.order-events.dlq" },
+      "retryLadder": {
+        "requeueTo": "review.order-events.queue",
+        "tiers": [
+          { "name": "review.order-events.retry.30s", "ttlMs": 30000 }
+        ]
+      }
+    },
+    {
+      "name": "review.rating-projection.queue",
+      "durable": true,
+      "bindings": [
+        { "exchange": "review.exchange", "routingKey": "review.review.submitted" },
+        { "exchange": "review.exchange", "routingKey": "review.review.updated" },
+        { "exchange": "review.exchange", "routingKey": "review.review.unpublished" }
+      ],
+      "deadLetter": { "exchange": "review.dlx", "routingKey": "review.rating-projection.dlq" },
+      "retryLadder": {
+        "requeueTo": "review.rating-projection.queue",
+        "tiers": [
+          { "name": "review.rating-projection.retry.10s", "ttlMs": 10000 },
+          { "name": "review.rating-projection.retry.30s", "ttlMs": 30000 }
+        ]
+      }
+    }
+  ],
+  "deadLetterQueues": [
+    { "name": "review.order-events.dlq", "exchange": "review.dlx", "routingKey": "review.order-events.dlq" },
+    { "name": "review.rating-projection.dlq", "exchange": "review.dlx", "routingKey": "review.rating-projection.dlq" }
+  ],
+  "_comment": "Consumer-side topology for OrderCreated/OrderDelivered (order.exchange, external) plus this service's own self-consumption of its 3 published events for the internal ProductRating projector (REV-6). Publish-side routing for ReviewSubmitted/ReviewUpdated/ReviewUnpublished is in publishedEvents above; downstream services (Product/Analytics/Search) declare their own queues/DLQs bound to review.exchange in their own manifests, not here."
+}

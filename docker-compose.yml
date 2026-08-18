@@ -1,0 +1,90 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: kart_review_dev
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5436:5432" # host 5432-5435 may already be bound by other local kart-* services
+    volumes:
+      - review-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mongo:
+    image: mongo:7.0
+    ports:
+      - "27021:27017" # host 27017-27020 may already be bound by other local kart-* services
+    volumes:
+      - review-mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    environment:
+      # RabbitMQ's default "guest" user is restricted to loopback-only connections — a container
+      # reaching it over the compose bridge network does not count as loopback, so a dedicated
+      # non-guest user is required (same fix every other kart-*-service's compose file applies).
+      RABBITMQ_DEFAULT_USER: "review"
+      RABBITMQ_DEFAULT_PASS: "review"
+    ports:
+      - "5677:5672"
+      - "15677:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  review-migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile.migrate
+    environment:
+      REVIEW_DB_CONNECTION_STRING: "Host=postgres;Port=5432;Database=kart_review_dev;Username=postgres;Password=postgres"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  review-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${REVIEW_PORT:-8095}:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      GlobalConfig__Path: /app/globalconfig.json
+      ConnectionStrings__ReviewDatabase: "Host=postgres;Port=5432;Database=kart_review_dev;Username=postgres;Password=postgres"
+      Mongo__ConnectionString: "mongodb://mongo:27017"
+      Mongo__Database: "kart_review_read_dev"
+      RabbitMq__HostName: "rabbitmq"
+      RabbitMq__UserName: "review"
+      RabbitMq__Password: "review"
+      # host.docker.internal:<port> reaches kart-identity-service's own local dev port on the host
+      # machine when not also containerized here — the JWKS endpoint bearer-token validation needs.
+      Identity__JwksUri: "http://host.docker.internal:${IDENTITY_PORT:-8081}/.well-known/jwks.json"
+      DevSeed__Enabled: "true"
+    volumes:
+      - ./docker/globalconfig.dev.json:/app/globalconfig.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      review-migrate:
+        condition: service_completed_successfully
+
+volumes:
+  review-postgres-data:
+  review-mongo-data:
